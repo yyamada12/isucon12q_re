@@ -42,8 +42,10 @@ alias als_bak='sudo alp ltsv -c ~/alp.yml --file /var/log/nginx/access_bak.log >
 alias pt='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow.log | less'
 alias pt_bak='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow_bak.log | less'
 # alias pts='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow.log | slackcat -c cancer_acropolis -n slowlog.txt'
-alias pts='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow.log ~/alp.yml > pt-result.txt && ~/upload_file_slack.sh pt-result.txt isucon && cat pt-result.txt && rm -f pt-result.txt'
+# alias pts='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow.log ~/alp.yml > pt-result.txt && ~/upload_file_slack.sh pt-result.txt isucon && cat pt-result.txt && rm -f pt-result.txt'
 alias pts_bak='sudo pt-query-digest --limit 10 --report-format profile,query_report /var/log/mysql/slow_bak.log ~/alp.yml > pt-result.txt && ~/upload_file_slack.sh pt-result.txt isucon && cat pt-result.txt && rm -f pt-result.txt'
+
+alias pts="jq -s 'group_by(.statement) | map({statement: .[0].statement, total_query_time: (map(.query_time) | add)}) | sort_by(.total_query_time) | reverse | map([(.total_query_time|tostring), .statement]) | .[] | @tsv' tmp/sqlite3.log | column -t -s $'\t' > pt-result.txt && ~/upload_file_slack.sh pt-result.txt isucon && cat pt-result.txt && rm -f pt-result.txt"
 
 # pprof
 alias pp='go tool pprof -http=":1234" ~/pprof/pprof.pb.gz'
