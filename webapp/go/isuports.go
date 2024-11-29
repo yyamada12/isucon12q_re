@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -131,6 +132,69 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+type SyncMap[K comparable, V any] struct {
+	m  map[K]*V
+	mu sync.RWMutex
+}
+
+func NewSyncMap[K comparable, V any]() *SyncMap[K, V] {
+	return &SyncMap[K, V]{m: map[K]*V{}}
+}
+
+func (sm *SyncMap[K, V]) Add(key K, value V) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.m[key] = &value
+}
+
+func (sm *SyncMap[K, V]) Get(key K) *V {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.m[key]
+}
+
+func (sm *SyncMap[K, V]) Clear() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.m = map[K]*V{}
+}
+
+var playersMap = NewSyncMap[string, PlayerRow]()
+
+func InitSyncMaps() {
+	LoadPlayerFromDB()
+}
+
+func LoadPlayerFromDB() {
+	// clear sync map
+	playersMap.Clear()
+
+	ctx := context.Background()
+
+	type tenant struct {
+		ID int64 `db:"id"`
+	}
+
+	tenants := []tenant{}
+	adminDB.Select(&tenants, "SELECT id FROM tenant")
+	for _, tenant := range tenants {
+		tenantDB, err := connectToTenantDB(tenant.ID)
+		if err != nil {
+			fmt.Println("error connectToTenantDB: %w", err)
+		}
+		var rows []*PlayerRow
+
+		if err := tenantDB.SelectContext(ctx, &rows, `SELECT * FROM player`); err != nil {
+			log.Fatalf("failed to load : %+v", err)
+			return
+		}
+		for _, row := range rows {
+			// add to sync map
+			playersMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.ID, *row)
+		}
+	}
+}
+
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
 	e := echo.New()
@@ -201,6 +265,8 @@ func Run() {
 		time.Sleep(time.Second * 2)
 	}
 	log.Print("DB ready!")
+
+	InitSyncMaps()
 
 	port := getEnv("SERVER_APP_PORT", "8080")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
@@ -819,6 +885,15 @@ func playersAddHandler(c echo.Context) error {
 				id, displayName, false, now, now, err,
 			)
 		}
+		playersMap.Add(strconv.Itoa(int(v.tenantID))+"-"+id, PlayerRow{
+			TenantID:       v.tenantID,
+			ID:             id,
+			DisplayName:    displayName,
+			IsDisqualified: false,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		})
+
 		p, err := retrievePlayer(ctx, tenantDB, id)
 		if err != nil {
 			return fmt.Errorf("error retrievePlayer: %w", err)
@@ -871,6 +946,15 @@ func playerDisqualifiedHandler(c echo.Context) error {
 			true, now, playerID, err,
 		)
 	}
+
+	oldPlayer := playersMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + playerID)
+	if oldPlayer != nil {
+		newPlayer := *oldPlayer
+		newPlayer.IsDisqualified = true
+		newPlayer.UpdatedAt = now
+		playersMap.Add(strconv.Itoa(int(v.tenantID))+"-"+playerID, newPlayer)
+	}
+
 	p, err := retrievePlayer(ctx, tenantDB, playerID)
 	if err != nil {
 		// 存在しないプレイヤー
@@ -1395,10 +1479,11 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		p := playersMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + ps.PlayerID)
+		// p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
+		// if err != nil {
+		// 	return fmt.Errorf("error retrievePlayer: %w", err)
+		// }
 		ranks = append(ranks, CompetitionRank{
 			Score:             ps.Score,
 			PlayerID:          p.ID,
@@ -1620,6 +1705,7 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
+	InitSyncMaps()
 	go func() {
 		if out, err := exec.Command("go", "tool", "pprof", "-seconds=30", "-proto", "-output", "/home/isucon/pprof/pprof.pb.gz", "localhost:6060/debug/pprof/profile").CombinedOutput(); err != nil {
 			fmt.Printf("pprof failed with err=%s, %s", string(out), err)
