@@ -192,6 +192,16 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
+	for {
+		err := adminDB.Ping()
+		if err == nil {
+			break
+		}
+		log.Print(err)
+		time.Sleep(time.Second * 2)
+	}
+	log.Print("DB ready!")
+
 	port := getEnv("SERVER_APP_PORT", "8080")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
 	serverPort := fmt.Sprintf(":%s", port)
