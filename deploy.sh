@@ -19,8 +19,9 @@ rotate_log ~/pprof/fgprof.pb.gz
 
 
 # build go app
+cd $APP_DIR/..
+docker compose -f docker-compose-go.yml build
 cd $APP_DIR
-$APP_BUILD_CMD
 
 # replace mysqld.cnf
 if [ -e ~/etc/mysql/mysqld.cnf ]; then
