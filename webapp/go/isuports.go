@@ -867,6 +867,9 @@ func playersAddHandler(c echo.Context) error {
 	}
 	displayNames := params["display_name[]"]
 
+	now := time.Now().Unix()
+	placeholders := []string{}
+	values := []interface{}{}
 	pds := make([]PlayerDetail, 0, len(displayNames))
 	for _, displayName := range displayNames {
 		id, err := dispenseID(ctx)
@@ -874,17 +877,9 @@ func playersAddHandler(c echo.Context) error {
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
 
-		now := time.Now().Unix()
-		if _, err := tenantDB.ExecContext(
-			ctx,
-			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			id, v.tenantID, displayName, false, now, now,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
-				id, displayName, false, now, now, err,
-			)
-		}
+		placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?)")
+		values = append(values, id, v.tenantID, displayName, false, now, now)
+
 		playersMap.Add(strconv.Itoa(int(v.tenantID))+"-"+id, PlayerRow{
 			TenantID:       v.tenantID,
 			ID:             id,
@@ -903,6 +898,15 @@ func playersAddHandler(c echo.Context) error {
 			DisplayName:    p.DisplayName,
 			IsDisqualified: p.IsDisqualified,
 		})
+	}
+	if _, err := tenantDB.ExecContext(
+		ctx,
+		"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES "+strings.Join(placeholders, ","), values...,
+	); err != nil {
+		return fmt.Errorf(
+			"error Insert player at tenantDB: %w",
+			err,
+		)
 	}
 
 	res := PlayersAddHandlerResult{
