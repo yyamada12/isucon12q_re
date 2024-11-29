@@ -153,6 +153,17 @@ func (sm *SyncMap[K, V]) Get(key K) *V {
 	return sm.m[key]
 }
 
+func (sm *SyncMap[K, V]) GetAll() map[K]*V {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	m2 := make(map[K]*V)
+	for key, value := range sm.m {
+		m2[key] = value
+	}
+	return m2
+}
+
 func (sm *SyncMap[K, V]) Clear() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -1514,35 +1525,28 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
-	pss := []PlayerScoreRow{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
-		tenant.ID,
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
-	}
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
+
+	m := playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + competitionID)
+	playerScores := m.GetAll()
+
+	ranks := make([]CompetitionRank, 0, len(playerScores))
+	scoredPlayerSet := make(map[string]struct{}, len(playerScores))
+	for playerID, score := range playerScores {
 		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
 		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+		if _, ok := scoredPlayerSet[playerID]; ok {
 			continue
 		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p := playersMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + ps.PlayerID)
+		scoredPlayerSet[playerID] = struct{}{}
+		p := playersMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + playerID)
 		// p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
 		// if err != nil {
 		// 	return fmt.Errorf("error retrievePlayer: %w", err)
 		// }
 		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
+			Score:             *score,
 			PlayerID:          p.ID,
 			PlayerDisplayName: p.DisplayName,
-			RowNum:            ps.RowNum,
 		})
 	}
 	sort.Slice(ranks, func(i, j int) bool {
