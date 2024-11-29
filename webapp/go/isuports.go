@@ -160,6 +160,7 @@ func (sm *SyncMap[K, V]) Clear() {
 }
 
 var playersMap = NewSyncMap[string, PlayerRow]()
+var playerScoresMap = NewSyncMap[string, SyncMap[string, int64]]()
 
 func InitSyncMaps() {
 	LoadPlayerFromDB()
@@ -168,6 +169,7 @@ func InitSyncMaps() {
 func LoadPlayerFromDB() {
 	// clear sync map
 	playersMap.Clear()
+	playerScoresMap.Clear()
 
 	ctx := context.Background()
 
@@ -182,8 +184,9 @@ func LoadPlayerFromDB() {
 		if err != nil {
 			fmt.Println("error connectToTenantDB: %w", err)
 		}
-		var rows []*PlayerRow
 
+		// players
+		var rows []*PlayerRow
 		if err := tenantDB.SelectContext(ctx, &rows, `SELECT * FROM player`); err != nil {
 			log.Fatalf("failed to load : %+v", err)
 			return
@@ -191,6 +194,22 @@ func LoadPlayerFromDB() {
 		for _, row := range rows {
 			// add to sync map
 			playersMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.ID, *row)
+		}
+
+		// player_scores
+		var playerScores []*PlayerScoreRow
+		if err := tenantDB.SelectContext(ctx, &playerScores, `SELECT * FROM player_score`); err != nil {
+			log.Fatalf("failed to load : %+v", err)
+			return
+		}
+		for _, row := range playerScores {
+			// add to sync map
+			m := playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + row.CompetitionID)
+			if m == nil {
+				playerScoresMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.CompetitionID, *NewSyncMap[string, int64]())
+				m = playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + row.CompetitionID)
+			}
+			m.Add(row.PlayerID, row.Score)
 		}
 	}
 }
@@ -1209,6 +1228,10 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
+	m := playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
+	if m != nil {
+		m.Clear()
+	}
 
 	placeholders := []string{}
 	values := []interface{}{}
@@ -1222,6 +1245,14 @@ func competitionScoreHandler(c echo.Context) error {
 			"error Insert player_score: %w",
 			err,
 		)
+	}
+	for _, ps := range playerScoreRows {
+		m := playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
+		if m == nil {
+			playerScoresMap.Add(strconv.Itoa(int(v.tenantID))+"-"+competitionID, *NewSyncMap[string, int64]())
+			m = playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
+		}
+		m.Add(ps.PlayerID, ps.Score)
 	}
 
 	return c.JSON(http.StatusOK, SuccessResult{
