@@ -1609,6 +1609,21 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
+	go func() {
+		if out, err := exec.Command("go", "tool", "pprof", "-seconds=30", "-proto", "-output", "/home/isucon/pprof/pprof.pb.gz", "localhost:6060/debug/pprof/profile").CombinedOutput(); err != nil {
+			fmt.Printf("pprof failed with err=%s, %s", string(out), err)
+		} else {
+			fmt.Printf("pprof.pb.gz created: %s", string(out))
+		}
+	}()
+	go func() {
+		if out, err := exec.Command("go", "tool", "pprof", "-seconds=30", "-proto", "-output", "/home/isucon/pprof/fgprof.pb.gz", "localhost:6060/debug/fgprof").CombinedOutput(); err != nil {
+			fmt.Printf("fgprof failed with err=%s, %s", string(out), err)
+		} else {
+			fmt.Printf("fgprof.pb.gz created: %s", string(out))
+		}
+	}()
+
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
