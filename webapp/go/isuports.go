@@ -889,10 +889,11 @@ func playersAddHandler(c echo.Context) error {
 			UpdatedAt:      now,
 		})
 
-		p, err := retrievePlayer(ctx, tenantDB, id)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		p := playersMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + id)
+		// p, err := retrievePlayer(ctx, tenantDB, id)
+		// if err != nil {
+		// 	return fmt.Errorf("error retrievePlayer: %w", err)
+		// }
 		pds = append(pds, PlayerDetail{
 			ID:             p.ID,
 			DisplayName:    p.DisplayName,
@@ -1162,15 +1163,19 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
-			// 存在しない参加者が含まれている
-			if errors.Is(err, sql.ErrNoRows) {
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					fmt.Sprintf("player not found: %s", playerID),
-				)
+
+		p := playersMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + playerID)
+		if p == nil {
+			if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
+				// 存在しない参加者が含まれている
+				if errors.Is(err, sql.ErrNoRows) {
+					return echo.NewHTTPError(
+						http.StatusBadRequest,
+						fmt.Sprintf("player not found: %s", playerID),
+					)
+				}
+				return fmt.Errorf("error retrievePlayer: %w", err)
 			}
-			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
 		var score int64
 		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
@@ -1313,12 +1318,15 @@ func playerHandler(c echo.Context) error {
 	if playerID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "player_id is required")
 	}
-	p, err := retrievePlayer(ctx, tenantDB, playerID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "player not found")
+	p := playersMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + playerID)
+	if p == nil {
+		p, err = retrievePlayer(ctx, tenantDB, playerID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusNotFound, "player not found")
+			}
+			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
-		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
 	cs := []CompetitionRow{}
 	if err := tenantDB.SelectContext(
@@ -1669,20 +1677,23 @@ func meHandler(c echo.Context) error {
 		return fmt.Errorf("error connectToTenantDB: %w", err)
 	}
 	ctx := context.Background()
-	p, err := retrievePlayer(ctx, tenantDB, v.playerID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return c.JSON(http.StatusOK, SuccessResult{
-				Status: true,
-				Data: MeHandlerResult{
-					Tenant:   td,
-					Me:       nil,
-					Role:     RoleNone,
-					LoggedIn: false,
-				},
-			})
+	p := playersMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + v.playerID)
+	if p == nil {
+		p, err = retrievePlayer(ctx, tenantDB, v.playerID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return c.JSON(http.StatusOK, SuccessResult{
+					Status: true,
+					Data: MeHandlerResult{
+						Tenant:   td,
+						Me:       nil,
+						Role:     RoleNone,
+						LoggedIn: false,
+					},
+				})
+			}
+			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
-		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
 
 	return c.JSON(http.StatusOK, SuccessResult{
