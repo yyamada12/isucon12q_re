@@ -1,0 +1,7 @@
+.*
+!.gitignore
+!.alias.bash
+/pprof
+/initial_data/
+/go/
+/go1.19.1.linux-amd64.tar.gz
