@@ -171,7 +171,7 @@ func (sm *SyncMap[K, V]) Clear() {
 }
 
 var playersMap = NewSyncMap[string, PlayerRow]()
-var playerScoresMap = NewSyncMap[string, SyncMap[string, int64]]()
+var playerScoresMap = NewSyncMap[string, SyncMap[string, PlayerScoreRow]]()
 
 func InitSyncMaps() {
 	LoadPlayerFromDB()
@@ -217,10 +217,10 @@ func LoadPlayerFromDB() {
 			// add to sync map
 			m := playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + row.CompetitionID)
 			if m == nil {
-				playerScoresMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.CompetitionID, *NewSyncMap[string, int64]())
+				playerScoresMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.CompetitionID, *NewSyncMap[string, PlayerScoreRow]())
 				m = playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + row.CompetitionID)
 			}
-			m.Add(row.PlayerID, row.Score)
+			m.Add(row.PlayerID, *row)
 		}
 	}
 }
@@ -1260,10 +1260,10 @@ func competitionScoreHandler(c echo.Context) error {
 	for _, ps := range playerScoreRowsMap {
 		m := playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
 		if m == nil {
-			playerScoresMap.Add(strconv.Itoa(int(v.tenantID))+"-"+competitionID, *NewSyncMap[string, int64]())
+			playerScoresMap.Add(strconv.Itoa(int(v.tenantID))+"-"+competitionID, *NewSyncMap[string, PlayerScoreRow]())
 			m = playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
 		}
-		m.Add(ps.PlayerID, ps.Score)
+		m.Add(ps.PlayerID, ps)
 	}
 
 	return c.JSON(http.StatusOK, SuccessResult{
@@ -1395,7 +1395,7 @@ func playerHandler(c echo.Context) error {
 			cached := psM.Get(playerID)
 			if cached != nil {
 				ps.CompetitionID = c.ID
-				ps.Score = *cached
+				ps.Score = cached.Score
 			}
 		}
 		if ps.CompetitionID == "" {
@@ -1527,26 +1527,23 @@ func competitionRankingHandler(c echo.Context) error {
 	defer fl.Close()
 
 	m := playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + competitionID)
-	playerScores := m.GetAll()
+	var playerScores map[string]*PlayerScoreRow
+	if m != nil {
+		playerScores = m.GetAll()
+	}
 
 	ranks := make([]CompetitionRank, 0, len(playerScores))
-	scoredPlayerSet := make(map[string]struct{}, len(playerScores))
-	for playerID, score := range playerScores {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[playerID]; ok {
-			continue
-		}
-		scoredPlayerSet[playerID] = struct{}{}
+	for playerID, playerScore := range playerScores {
 		p := playersMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + playerID)
 		// p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
 		// if err != nil {
 		// 	return fmt.Errorf("error retrievePlayer: %w", err)
 		// }
 		ranks = append(ranks, CompetitionRank{
-			Score:             *score,
+			Score:             playerScore.Score,
 			PlayerID:          p.ID,
 			PlayerDisplayName: p.DisplayName,
+			RowNum:            playerScore.RowNum,
 		})
 	}
 	sort.Slice(ranks, func(i, j int) bool {
