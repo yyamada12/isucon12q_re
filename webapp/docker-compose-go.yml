@@ -9,6 +9,7 @@ services:
       ISUCON_DB_NAME: isuports
       ISUCON_ADMIN_HOSTNAME: admin.t.isucon.pw
       ISUCON_BASE_HOSTNAME: .t.isucon.pw
+      ISUCON_SQLITE_TRACE_FILE: /home/isucon/tmp/sqlite3.log
     network_mode: host
     volumes:
       - /home/isucon/webapp/tenant_db:/home/isucon/webapp/tenant_db
@@ -16,4 +17,5 @@ services:
       - /home/isucon/webapp/public.pem:/home/isucon/webapp/public.pem:ro
       - /home/isucon/initial_data:/home/isucon/initial_data
       - /home/isucon/tmp:/home/isucon/tmp
+      - /home/isucon/pprof:/home/isucon/pprof
     init: true
