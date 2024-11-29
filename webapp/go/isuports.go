@@ -1168,7 +1168,7 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 	defer fl.Close()
 	var rowNum int64
-	playerScoreRows := []PlayerScoreRow{}
+	playerScoreRowsMap := map[string]PlayerScoreRow{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1208,7 +1208,7 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("error dispenseID: %w", err)
 		}
 		now := time.Now().Unix()
-		playerScoreRows = append(playerScoreRows, PlayerScoreRow{
+		playerScoreRowsMap[playerID] = PlayerScoreRow{
 			ID:            id,
 			TenantID:      v.tenantID,
 			PlayerID:      playerID,
@@ -1217,7 +1217,7 @@ func competitionScoreHandler(c echo.Context) error {
 			RowNum:        rowNum,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		})
+		}
 	}
 
 	if _, err := tenantDB.ExecContext(
@@ -1235,7 +1235,7 @@ func competitionScoreHandler(c echo.Context) error {
 
 	placeholders := []string{}
 	values := []interface{}{}
-	for _, ps := range playerScoreRows {
+	for _, ps := range playerScoreRowsMap {
 		placeholders = append(placeholders, "(?, ?, ?, ?, ?, ?, ?, ?)")
 		values = append(values, ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt)
 	}
@@ -1246,7 +1246,7 @@ func competitionScoreHandler(c echo.Context) error {
 			err,
 		)
 	}
-	for _, ps := range playerScoreRows {
+	for _, ps := range playerScoreRowsMap {
 		m := playerScoresMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + competitionID)
 		if m == nil {
 			playerScoresMap.Add(strconv.Itoa(int(v.tenantID))+"-"+competitionID, *NewSyncMap[string, int64]())
@@ -1257,7 +1257,7 @@ func competitionScoreHandler(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
-		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
+		Data:   ScoreHandlerResult{Rows: rowNum - 1},
 	})
 }
 
