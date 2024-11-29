@@ -172,15 +172,13 @@ func (sm *SyncMap[K, V]) Clear() {
 
 var playersMap = NewSyncMap[string, PlayerRow]()
 var playerScoresMap = NewSyncMap[string, SyncMap[string, PlayerScoreRow]]()
+var competitionsMap = NewSyncMap[string, CompetitionRow]()
 
 func InitSyncMaps() {
-	LoadPlayerFromDB()
-}
-
-func LoadPlayerFromDB() {
 	// clear sync map
 	playersMap.Clear()
 	playerScoresMap.Clear()
+	competitionsMap.Clear()
 
 	ctx := context.Background()
 
@@ -221,6 +219,17 @@ func LoadPlayerFromDB() {
 				m = playerScoresMap.Get(strconv.Itoa(int(tenant.ID)) + "-" + row.CompetitionID)
 			}
 			m.Add(row.PlayerID, *row)
+		}
+
+		// competitions
+		var competitionRows []*CompetitionRow
+		if err := tenantDB.SelectContext(ctx, &competitionRows, `SELECT * FROM competition`); err != nil {
+			log.Fatalf("failed to load : %+v", err)
+			return
+		}
+		for _, row := range competitionRows {
+			// add to sync map
+			competitionsMap.Add(strconv.Itoa(int(tenant.ID))+"-"+row.ID, *row)
 		}
 	}
 }
@@ -1055,6 +1064,15 @@ func competitionsAddHandler(c echo.Context) error {
 		)
 	}
 
+	competitionsMap.Add(strconv.Itoa(int(v.tenantID))+"-"+id, CompetitionRow{
+		TenantID:   v.tenantID,
+		ID:         id,
+		Title:      title,
+		FinishedAt: sql.NullInt64{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1420,9 +1438,12 @@ func playerHandler(c echo.Context) error {
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
 	for _, ps := range pss {
-		comp, err := retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
-		if err != nil {
-			return fmt.Errorf("error retrieveCompetition: %w", err)
+		comp := competitionsMap.Get(strconv.Itoa(int(v.tenantID)) + "-" + ps.CompetitionID)
+		if comp == nil {
+			comp, err = retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
+			if err != nil {
+				return fmt.Errorf("error retrieveCompetition: %w", err)
+			}
 		}
 		psds = append(psds, PlayerScoreDetail{
 			CompetitionTitle: comp.Title,
