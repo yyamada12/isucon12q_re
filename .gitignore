@@ -4,6 +4,7 @@
 !.vscode/
 /pprof
 /initial_data/
+/initial_data.bak/
 /go/
 /go1.19.1.linux-amd64.tar.gz
 /webapp/go/isuports
